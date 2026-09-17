@@ -1,0 +1,41 @@
+.history/
+.idea/
+.claude/
+.vscode/
+.workbuddy/
+.qoder/
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+.env
+.env*
+
+
+*.exe
+
+node_modules/
+dist/
+build/
+.coverage
+.coverage.*
+
+.DS_Store
+Thumbs.db
+
+SpaceKey/
+keyia/
+.syntaxcheck/
+
+# 个人配置，不入仓库
+*.ini
+
+# 备份 / 测试残留，不入仓库
+bak/
+flash-search/test.txt
+
+# 内部验证材料 / 旧资源，不入仓库
+AHKv2-Advanced/
+flash-search/old_icon/
