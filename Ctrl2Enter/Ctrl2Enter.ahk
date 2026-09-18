@@ -184,7 +184,9 @@ JsonReadNumber(state) {
     n := StrLen(state.src)
     while (state.p <= n) {
         c := SubStr(state.src, state.p, 1)
-        if ((c >= "0" && c <= "9") || c = "." || c = "-" || c = "+" || c = "e" || c = "E")
+        ; v2 关系比较遇非数字字符串会抛错（"a" >= "0" → Expected a Number），
+        ; 必须用 IsDigit 判数字字符，不可写 c >= "0"
+        if (IsDigit(c) || c = "." || c = "-" || c = "+" || c = "e" || c = "E")
             state.p := state.p + 1
         else
             break
@@ -266,6 +268,9 @@ LoadConfig() {
     } catch {
         ; 配置损坏则忽略，保留默认值
     }
+    ; 历史脏数据修复：坏版本时期可能把空热键存入 config
+    if (gSettings["settingsHotkey"] = "")
+        gSettings["settingsHotkey"] := "^!s"
 }
 
 ; ============================================================================
@@ -307,26 +312,36 @@ show_tip(Text, Delay := 1800, TextSize := 14, Ypos := 0, TextWeight := 700, Text
 }
 
 ; ============================================================================
-; 开机自动启动（Startup 快捷方式，比注册表更透明）
+; 开机自动启动（HKCU Run 注册表项，借鉴 flash-search；比 Startup 快捷方式抗破坏）
+; 同步原则：config 记录用户意图；注册项为执行结果。启动时意图为开而注册项
+; 缺失或指向旧路径 → 自动重建（自愈），而非静默关闭。
 ; ============================================================================
-StartupLnk := A_Startup "\" APP_NAME ".lnk"
-CheckAutostart() {
-    if !FileExist(StartupLnk)
+RUN_REG  := "HKCU\Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_NAME := APP_NAME
+AutostartCmd() {
+    return A_IsCompiled ? '"' A_ScriptFullPath '"'
+                        : '"' A_AhkPath '" "' A_ScriptFullPath '"'
+}
+AutostartExists() {
+    try return RegRead(RUN_REG, RUN_NAME) != ""
+    catch
         return false
-    FileGetShortcut(StartupLnk, &target, , &args)
-    exe := A_IsCompiled ? A_ScriptFullPath : A_AhkPath
-    script := A_IsCompiled ? "" : ' "' A_ScriptFullPath '"'
-    return target == exe && args == script
+}
+CheckAutostart() {
+    try return RegRead(RUN_REG, RUN_NAME) == AutostartCmd()
+    catch
+        return false
 }
 SetAutostart(on) {
-    if (on) {
-        if CheckAutostart()
-            return
-        exe := A_IsCompiled ? A_ScriptFullPath : A_AhkPath
-        args := A_IsCompiled ? "" : '"' A_ScriptFullPath '"'
-        FileCreateShortcut(exe, StartupLnk, , args, APP_NAME " - " APP_AUTHOR, , , , 7)
-    } else {
-        try FileDelete(StartupLnk)
+    try {
+        if on
+            RegWrite(AutostartCmd(), "REG_SZ", RUN_REG, RUN_NAME)
+        else
+            RegDelete(RUN_REG, RUN_NAME)
+        return true
+    } catch {
+        StartupLog("AUTOSTART_FAIL  on=" on "  err=" A_Error.Message)
+        return false
     }
 }
 
@@ -554,12 +569,21 @@ StartupLog(msg) {
 try {
     StartupLog("LAUNCH  " A_ScriptFullPath)
     LoadConfig()
-    ; 同步自启动状态：Startup 快捷方式是否存在优先于 config
-    hasStartup := CheckAutostart()
-    if (gSettings["autostart"] != hasStartup) {
-        gSettings["autostart"] := hasStartup
-        SaveConfig()
-        StartupLog("autostart sync: config=" (gSettings["autostart"]) " → actual=" hasStartup)
+    ; 迁移：清理旧版 Startup 快捷方式，避免双重启动
+    oldLnk := A_Startup "\" APP_NAME ".lnk"
+    if FileExist(oldLnk) {
+        try FileDelete(oldLnk)
+        StartupLog("legacy startup lnk removed")
+    }
+    ; 自愈式同步：意图（config autostart）为权威，注册项为结果
+    if gSettings["autostart"] {
+        if !CheckAutostart() {
+            SetAutostart(true)
+            StartupLog("autostart self-heal: reg recreated  path=" A_ScriptFullPath)
+        }
+    } else if AutostartExists() {
+        SetAutostart(false)
+        StartupLog("autostart sync: intent=off → reg deleted")
     }
     StartupLog("config loaded (trayHidden=" gSettings["trayHidden"] ", enabled=" gSettings["enabled"] ")")
     gEnabled := gSettings["enabled"]

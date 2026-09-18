@@ -33,7 +33,8 @@ global g_SettingsGui := unset        ; 设置窗口 Gui 对象
 ; 支持的搜索引擎列表
 global g_SearchEngines := ["bing", "google", "baidu", "duckduckgo", "github", "mdn"]
 ; 文件夹打开方式：内部值 -> 显示标签
-global g_FolderOpenerOptions := [["vscode", "VSCode (vscode://file/)"], ["explorer", "资源管理器"], ["cursor",
+global g_FolderOpenerOptions := [["vscode", "VSCode (vscode://file/)"], ["explorer", "资源管理器"], ["pwsh",
+    "PowerShell 7 (pwsh)"], ["cursor",
     "Cursor (cursor://file/)"], ["windsurf", "Windsurf (windsurf://file/)"], ["custom", "自定义命令"]]
 
 ; 加载配置 + 初始化托盘菜单 + 注册主快捷键
@@ -162,10 +163,15 @@ SetSearchEngineHandler(name, *) {
     SaveConfig()
     ; 重建托盘菜单以刷新子菜单勾选状态
     SetupAutostartTray()
-    try TrayTip("搜索引擎已切换为：" name, "Flash Search", "Iconi T1")
+    try TrayTip("搜索引擎已切换为：" name, "Flash Search", "Iconi")
 }
 
 ; 加载配置（flash-search.ini）
+; === 向后兼容约定（新增设置项必须遵循）===
+;   1. 新字段只在代码里声明全局默认值，ini 缺键时 IniRead 第 4 参数兜底
+;   2. 每个字段独立 try 包裹，单个键损坏不影响其余字段
+;   3. 枚举值读取后必须在对应 Options 列表内校验，非法回退默认
+;   4. 旧版本读新 ini 时多余的键被自动忽略，无需处理
 LoadConfig() {
     global g_SearchEngine, g_MaxLinks, g_TextEditor, g_FolderOpener, g_FolderCustomCmd, g_AutoClosePanel
     global g_Hotkey, g_SearchEngines, g_FolderOpenerOptions
@@ -419,6 +425,15 @@ OpenFolderPath(path) {
             if (TryRun('cursor://file/' uriPath))
                 return
             if (TryRun('cursor "' path '"'))
+                return
+        case "pwsh":
+            ; 优先 Program Files 安装版，否则依赖 PATH（scoop/winget shim）
+            local pwshExe := FileExist(A_ProgramFiles "\PowerShell\7\pwsh.exe")
+                ? A_ProgramFiles "\PowerShell\7\pwsh.exe" : "pwsh"
+            local q := Chr(39)                            ; PS 单引号（-Command 内包路径，免插值）
+            local escPath := StrReplace(path, q, q q)     ; PS 单引号字面量转义
+            local psCmd := '"' pwshExe '" -NoExit -Command "Set-Location -LiteralPath ' q escPath q '"'
+            if (TryRun(psCmd))
                 return
         case "windsurf":
             if (TryRun('windsurf://file/' uriPath))
@@ -858,7 +873,7 @@ CopyToClipboard(text) {
     try
     {
         A_Clipboard := text
-        TrayTip("已复制：" SubStr(text, 1, 60), "Flash Search", "Iconi T1")
+        TrayTip("已复制：" SubStr(text, 1, 60), "Flash Search", "Iconi")
     }
     catch Error as e
         MsgBox("复制失败：`n" e.Message, "Flash Search", "Icon!")
@@ -1321,7 +1336,7 @@ ReloadSettingsFromIni() {
     LoadConfig()
     CloseSettings()
     ShowSettings()
-    TrayTip("已从 flash-search.ini 重新载入配置", "Flash Search", "Iconi T1")
+    TrayTip("已从 flash-search.ini 重新载入配置", "Flash Search", "Iconi")
 }
 
 ; 保存设置并关闭
@@ -1381,5 +1396,5 @@ SaveSettingsAndClose() {
     ; 同步托盘菜单勾选状态
     SetupAutostartTray()
     CloseSettings()
-    TrayTip("设置已保存到 flash-search.ini", "Flash Search", "Iconi T1")
+    TrayTip("设置已保存到 flash-search.ini", "Flash Search", "Iconi")
 }
